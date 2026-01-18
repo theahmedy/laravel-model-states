@@ -11,6 +11,7 @@ class ModelStatesServiceProvider extends PackageServiceProvider
     {
         $package
             ->name('laravel-model-states')
-            ->hasConfigFile();
+            ->hasConfigFile()
+            ->hasMigration('create_model_state_transitions_table');
     }
 }

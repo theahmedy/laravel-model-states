@@ -53,4 +53,9 @@ class InvalidConfig extends Exception
 
         return MissingTraitOnModel::make($modelClass, $trait);
     }
+
+    public static function transitionHistoryTableMissing(string $table): InvalidConfig
+    {
+        return new self("Transition history storage is enabled, but the table `{$table}` does not exist. Publish and run the package migration (php artisan vendor:publish --tag=laravel-model-states-migrations && php artisan migrate), or disable `model-states.transition_history.enabled`.");
+    }
 }

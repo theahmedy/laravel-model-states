@@ -11,6 +11,7 @@ use Spatie\ModelStates\Events\StateChanged;
 use Spatie\ModelStates\Exceptions\ClassDoesNotExtendBaseClass;
 use Spatie\ModelStates\Exceptions\CouldNotPerformTransition;
 use Spatie\ModelStates\Exceptions\InvalidConfig;
+use Spatie\ModelStates\Support\TransitionHistory;
 
 /**
  * @template TModel of \Illuminate\Database\Eloquent\Model
@@ -25,13 +26,19 @@ abstract class State implements Castable, JsonSerializable
 
     private static array $stateMapping = [];
 
+    protected bool $transitionDataLoaded = false;
+
+    protected ?array $transitionMetaData = null;
+
+    protected ?\DateTimeInterface $transitionCreatedAt = null;
+
     /**
      * @param  TModel  $model
      */
-    public function __construct($model)
+    public function __construct($model, ?StateConfig $stateConfig = null)
     {
         $this->model = $model;
-        $this->stateConfig = static::config();
+        $this->stateConfig = $stateConfig ?? static::config();
     }
 
     public static function config(): StateConfig
@@ -152,6 +159,8 @@ abstract class State implements Castable, JsonSerializable
      */
     public function transitionTo($newState, ...$transitionArgs)
     {
+        $metaData = $this->extractMetaDataFromArgs($transitionArgs);
+
         $newState = $this->resolveStateObject($newState);
 
         $from = static::getMorphClass();
@@ -168,6 +177,8 @@ abstract class State implements Castable, JsonSerializable
             $newState,
             ...$transitionArgs
         );
+
+        $transition->setMetaData($metaData);
 
         return $this->transition($transition);
     }
@@ -187,6 +198,12 @@ abstract class State implements Castable, JsonSerializable
 
         $model = app()->call([$transition, 'handle']);
         $model->{$this->field}->setField($this->field);
+
+        $record = TransitionHistory::record($this, $model->{$this->field}, $transition);
+
+        if ($record) {
+            $model->{$this->field}->setTransitionData($record->meta_data, $record->created_at);
+        }
 
         $stateChangedEvent = $this->stateConfig->stateChangedEvent;
 
@@ -256,6 +273,8 @@ abstract class State implements Castable, JsonSerializable
 
     public function canTransitionTo($newState, ...$transitionArgs): bool
     {
+        $this->extractMetaDataFromArgs($transitionArgs);
+
         $newState = $this->resolveStateObject($newState);
 
         $from = static::getMorphClass();
@@ -278,6 +297,29 @@ abstract class State implements Castable, JsonSerializable
         }
 
         return true;
+    }
+
+    public function metaData(): ?array
+    {
+        $this->ensureTransitionDataLoaded();
+
+        return $this->transitionMetaData;
+    }
+
+    public function createdAt(): ?\DateTimeInterface
+    {
+        $this->ensureTransitionDataLoaded();
+
+        return $this->transitionCreatedAt;
+    }
+
+    public function setTransitionData(?array $metaData, ?\DateTimeInterface $createdAt): self
+    {
+        $this->transitionDataLoaded = true;
+        $this->transitionMetaData = $metaData;
+        $this->transitionCreatedAt = $createdAt;
+
+        return $this;
     }
 
     public function getValue(): string
@@ -321,6 +363,47 @@ abstract class State implements Castable, JsonSerializable
         $stateClassName = $this->stateConfig->baseStateClass::resolveStateClass($state);
 
         return new $stateClassName($this->model, $this->stateConfig);
+    }
+
+    private function ensureTransitionDataLoaded(): void
+    {
+        if ($this->transitionDataLoaded) {
+            return;
+        }
+
+        if (! isset($this->field)) {
+            $this->transitionMetaData = null;
+            $this->transitionCreatedAt = null;
+            $this->transitionDataLoaded = true;
+
+            return;
+        }
+
+        $data = TransitionHistory::loadForState($this);
+
+        $this->transitionMetaData = $data['metaData'];
+        $this->transitionCreatedAt = $data['createdAt'];
+        $this->transitionDataLoaded = true;
+    }
+
+    private function extractMetaDataFromArgs(array &$transitionArgs): ?array
+    {
+        if (! array_key_exists('metaData', $transitionArgs)) {
+            return null;
+        }
+
+        $metaData = $transitionArgs['metaData'];
+        unset($transitionArgs['metaData']);
+
+        if ($metaData === null) {
+            return null;
+        }
+
+        if (! is_array($metaData)) {
+            throw new \InvalidArgumentException('The `metaData` transition argument must be an array or null.');
+        }
+
+        return $metaData;
     }
 
     private function resolveTransitionClass(

@@ -131,6 +131,42 @@ composer test
 
 Please see [CHANGELOG](CHANGELOG.md) for more information on what has changed recently.
 
+## Transition history (metadata & timestamps)
+
+By default, Model States only stores the current state value on your model.
+
+If you want to keep a transition log with per-transition timestamps and optional metadata, you can opt-in to transition history storage.
+
+### Setup
+
+- Publish the migration: `php artisan vendor:publish --tag=laravel-model-states-migrations`
+- Run migrations: `php artisan migrate`
+- Enable in `config/model-states.php`:
+
+```php
+'transition_history' => [
+    'enabled' => true,
+],
+```
+
+### Writing metadata
+
+```php
+$model->status->transitionTo(Published::class, metaData: [
+    'approved_by' => 5,
+    'comment' => 'Reviewed',
+]);
+```
+
+### Reading metadata and timestamps
+
+```php
+$model->status->metaData();  // array|null
+$model->status->createdAt(); // DateTimeInterface|null
+```
+
+When transition history is disabled (the default), no transitions are stored and both methods return `null`.
+
 ## Contributing
 
 Please see [CONTRIBUTING](https://github.com/spatie/.github/blob/main/CONTRIBUTING.md) for details.
